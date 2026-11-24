@@ -1,7 +1,7 @@
 namespace UELauncher;
 
-public enum OptGroup { General, Content, Release, Cook, AdvancedCook, Build, Directory, Deploy, Deprecated, Advanced }
-public enum OptKind { Check, Tri, Text, Folder, File, Incremental, Maps, Target, Platform, Architecture, Configuration, Scheme, InitialMap }
+public enum OptGroup { General, Content, Release, Cook, AdvancedCook, ConcurrentCook, Build, Directory, Deploy, Deprecated, Advanced }
+public enum OptKind { Check, Tri, Text, Folder, File, Incremental, Maps, Target, Platform, Architecture, Configuration, Scheme, InitialMap, Override }
 
 public sealed record OptionContext(Profile P, SchemeBehavior B);
 
@@ -21,6 +21,16 @@ public sealed class OptionDef
 
 	/// <summary>For a Project / On / Off option: what the project itself says, shown in the "Project setting" entry.</summary>
 	public Func<ProjectSettings, bool>? ProjectValue { get; init; }
+
+	// An Override option: a checkbox that turns on a number. Off leaves the project's value, which ProjectNumber shows.
+	public Func<Profile, decimal?>? GetNumber { get; init; }
+	public Action<Profile, decimal?>? SetNumber { get; init; }
+	public Func<ProjectSettings, decimal?>? ProjectNumber { get; init; }
+	public decimal Min { get; init; } = 1;
+	public decimal Max { get; init; } = 100000;
+	public decimal Fallback { get; init; } = 1;
+	public decimal MinWhenOn { get; init; } = 1;
+	public int Decimals { get; init; }
 	public string Tip { get; init; } = "";
 	public Func<Profile, bool>? GetBool { get; init; }
 	public Action<Profile, bool>? SetBool { get; init; }
@@ -99,6 +109,11 @@ public static class OptionCatalog
 		Value("ExtraCook", OptGroup.AdvancedCook, OptKind.Text, "Additional Cooker Options", new[] { "AdditionalCookerOptions" }, P => P.ExtraCook, (P, V) => P.ExtraCook = V, "AddAdditionalCookerOptionsProperty", "AdditionalCookerOptionsLabel", C => C.P.Cook && !C.B.ZenPak && !C.B.PreStaged),
 		Check("SkipEditor", OptGroup.AdvancedCook, "Don't include editor content in the build", new[] { "SkipCookingEditorContent" }, P => P.SkipEditorContent, (P, V) => P.SkipEditorContent = V, null, "SkipEditorContentLabel", ForEnabledCooked),
 
+		new() { Id = "CookProcesses", Group = OptGroup.ConcurrentCook, Kind = OptKind.Override, Label = "Cook processes", CookSwitches = new[] { "CookProcessCount" }, GetNumber = P => P.CookProcesses, SetNumber = (P, V) => P.CookProcesses = V, ProjectNumber = S => S.CookProcessCount, Min = 1, Max = 64, Fallback = 1, MinWhenOn = 2, Visible = ForEnabledCooked, Tip = "Passes -CookProcessCount. 1 is a single process; N is one director and N-1 cook workers, which share the CPU cores and use more memory." },
+		new() { Id = "CoreSubscription", Group = OptGroup.ConcurrentCook, Kind = OptKind.Override, Label = "Core subscription", CookSwitches = new[] { "MPCookCoreSubscription" }, GetNumber = P => P.CoreSubscription, SetNumber = (P, V) => P.CoreSubscription = V, Min = 0.25m, Max = 16, Fallback = 1, MinWhenOn = 0.25m, Decimals = 2, Visible = ForEnabledCooked, Enabled = C => C.P.CookProcesses > 1, Tip = "Passes -MPCookCoreSubscription. Each process normally gets cores / processes; this multiplies that share. Needs more than one cook process." },
+		new() { Id = "MaxConcurrentShaderJobs", Group = OptGroup.ConcurrentCook, Kind = OptKind.Override, Label = "Max concurrent shader jobs", CookSwitches = new[] { "MaxConcurrentShaderJobs" }, GetNumber = P => P.MaxConcurrentShaderJobs, SetNumber = (P, V) => P.MaxConcurrentShaderJobs = V, ProjectNumber = S => S.MaxConcurrentShaderJobs, Max = 1000000, Fallback = Environment.ProcessorCount * 4, Visible = ForEnabledCooked, Tip = "Overrides [CookSettings] MaxConcurrentShaderJobs for this cook only. The project's ini files are not changed." },
+		new() { Id = "MaxPrecacheShaderJobs", Group = OptGroup.ConcurrentCook, Kind = OptKind.Override, Label = "Max precache shader jobs", CookSwitches = new[] { "MaxPrecacheShaderJobs" }, GetNumber = P => P.MaxPrecacheShaderJobs, SetNumber = (P, V) => P.MaxPrecacheShaderJobs = V, ProjectNumber = S => S.MaxPrecacheShaderJobs, Max = 1000000, Fallback = Math.Max(1, Environment.ProcessorCount - 1), Visible = ForEnabledCooked, Tip = "Overrides [CookSettings] MaxPrecacheShaderJobs for this cook only. The project's ini files are not changed." },
+
 		Check("Build", OptGroup.Build, "Build the game", new[] { "build" }, P => P.Build, (P, V) => P.Build = V, "AddBuildProperty", null, ForCode),
 		Check("ForceBuild", OptGroup.Build, "Build even if a pre-built target exists", new[] { "build" }, P => P.ForceBuild, (P, V) => P.ForceBuild = V, "AddForceBuildProperty", null, ForCode, C => C.P.Build, "Off: build only if there is no matching pre-built target. On: always pass -build."),
 		Check("Clean", OptGroup.Build, "Clean first", new[] { "clean" }, P => P.Clean, (P, V) => P.Clean = V, null, null, ForCode, C => C.P.Build, "Passes -clean: rebuilds the game's code and cooks from scratch instead of reusing the last output."),
@@ -132,7 +147,7 @@ public static class OptionCatalog
 	static readonly Dictionary<OptGroup, string> Titles = new()
 	{
 		[OptGroup.General] = "General Settings", [OptGroup.Content] = "Content Scheme", [OptGroup.Release] = "Release / DLC / Patching", [OptGroup.Cook] = "Cook",
-		[OptGroup.AdvancedCook] = "Advanced Cooking Options", [OptGroup.Build] = "Build", [OptGroup.Directory] = "Directory", [OptGroup.Deploy] = "Deploy And Run",
+		[OptGroup.AdvancedCook] = "Advanced Cooking Options", [OptGroup.ConcurrentCook] = "Concurrent Cook",[OptGroup.Build] = "Build", [OptGroup.Directory] = "Directory", [OptGroup.Deploy] = "Deploy And Run",
 		[OptGroup.Deprecated] = "Deprecated Properties", [OptGroup.Advanced] = "Advanced"
 	};
 

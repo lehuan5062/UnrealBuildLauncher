@@ -12,8 +12,11 @@ public sealed class MainForm : Form, IMessageFilter
 	/// <summary>The wheel never changes a closed dropdown. Over the options it scrolls the options instead; an open list still scrolls normally.</summary>
 	public bool PreFilterMessage(ref Message M)
 	{
-		if (M.Msg != WmMouseWheel || Control.FromChildHandle(M.HWnd) is not ComboBox B || B.DroppedDown) { return false; }
-		if (_options.Contains(B)) { SendMessage(_options.Handle, WmMouseWheel, M.WParam, M.LParam); }
+		if (M.Msg != WmMouseWheel) { return false; }
+		var Target = Control.FromChildHandle(M.HWnd);
+		if (Target?.Parent is NumericUpDown) { Target = Target.Parent; }
+		if (Target is not (ComboBox or NumericUpDown) || Target is ComboBox { DroppedDown: true }) { return false; }
+		if (_options.Contains(Target)) { SendMessage(_options.Handle, WmMouseWheel, M.WParam, M.LParam); }
 		return true;
 	}
 
@@ -26,8 +29,8 @@ public sealed class MainForm : Form, IMessageFilter
 	const uint WmMouseMove = 0x0200, WmLButtonDown = 0x0201, WmLButtonUp = 0x0202, LbSetCurSel = 0x0186, WmKeyDown = 0x0100;
 	const int VkEscape = 0x1B;
 
-	readonly TextBox _project = new() { ReadOnly = true, Dock = DockStyle.Fill };
-	readonly ComboBox _engine = new() { Dock = DockStyle.Fill };
+	readonly ComboBox _project = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, MaxDropDownItems = 12 };
+	readonly ComboBox _engine = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
 	readonly Label _engineInfo = new() { AutoSize = true, Padding = new Padding(0, 4, 0, 4) };
 	readonly ComboBox _profiles = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
 	readonly Panel _options = new() { Dock = DockStyle.Fill, AutoScroll = true };
@@ -51,7 +54,7 @@ public sealed class MainForm : Form, IMessageFilter
 	Label? _schemeHint;
 	ProjectInfo? _proj;
 	EngineInfo? _eng;
-	Profile _current = Profile.Shipping();
+	Profile _current = Profile.Fresh();
 	BuildRunner? _runner;
 	DateTime _started;
 	string _phaseName = "Idle";
@@ -150,18 +153,10 @@ public sealed class MainForm : Form, IMessageFilter
 			if (_eng != null) { SelectEngine(_eng.Root, true); }
 		};
 		_engine.SelectionChangeCommitted += (_, _) => { if (_engine.SelectedItem is EngineItem I) { SelectEngine(I.Root, false); } };
-		_engine.KeyDown += (_, K) => { if (K.KeyCode == Keys.Enter && _engine.Text.Length > 0) { SelectEngine(_engine.Text, false); } };
 		_profiles.SelectedIndexChanged += (_, _) => { if (!_loading && _profiles.SelectedItem is Profile P) { _current = Working(P); RebuildOptions(); } };
-		SaveBtn.Click += (_, _) => SaveProfile(_current.Name);
-		SaveAs.Click += (_, _) =>
-		{
-			var N = Prompt("Profile name", _current.Name);
-			if (string.IsNullOrWhiteSpace(N)) { return; }
-			// The edits move to the new profile, so the original goes back to how it was saved.
-			if (_proj != null) { _state.For(_proj.Path_).Working.Remove(_current.Name); }
-			_current.Name = N.Trim();
-			SaveProfile(_current.Name);
-		};
+		// Save writes the open profile; one that has never been saved asks for a name first.
+		SaveBtn.Click += (_, _) => { if (_profiles.SelectedItem == null) { SaveAsProfile(); } else { SaveProfile(_current.Name); } };
+		SaveAs.Click += (_, _) => SaveAsProfile();
 		_revert.Click += (_, _) => RevertProfile();
 		_saveState.Tick += (_, _) => { _saveState.Stop(); _state.Save(_statePath); };
 		FormClosing += (_, _) => { Remember(); _saveState.Stop(); _state.Save(_statePath); };
@@ -183,6 +178,8 @@ public sealed class MainForm : Form, IMessageFilter
 		_drain.Start();
 
 		foreach (var (Name, Root) in EngineScanner.Discover()) { _engine.Items.Add(new EngineItem(Name, Root)); }
+		_project.SelectionChangeCommitted += (_, _) => BeginInvoke(PickProject);
+		RefreshProjects();
 		var Start = UProject ?? (_state.LastProject.Length > 0 ? _state.LastProject : null);
 		if (Start != null && File.Exists(Start)) { OpenProject(Start); }
 		else if (_state.LastEngine.Length > 0 && EngineScanner.IsEngineRoot(_state.LastEngine)) { SelectEngine(_state.LastEngine, false); }
@@ -198,7 +195,8 @@ public sealed class MainForm : Form, IMessageFilter
 		try
 		{
 			_proj = ProjectInfo.Load(FilePath);
-			_project.Text = _proj.Path_;
+			_state.AddRecent(_proj.Path_);
+			RefreshProjects();
 			Text = $"UE Launcher - {_proj.Name}";
 			var Memory = _state.For(_proj.Path_);
 			LoadProfiles(Memory.Profile.Length > 0 ? Memory.Profile : null);
@@ -209,7 +207,31 @@ public sealed class MainForm : Form, IMessageFilter
 			if (Root != null) { SelectEngine(Root, false); }
 			else { _engineInfo.Text = $"The project asks for engine '{_proj.EngineAssociation}', which was not found: select its folder."; RebuildOptions(); }
 		}
-		catch (Exception Ex) when (Ex is IOException or JsonException or UnauthorizedAccessException) { MessageBox.Show(this, Ex.Message, "Cannot open project"); }
+		catch (Exception Ex) when (Ex is IOException or JsonException or UnauthorizedAccessException)
+		{
+			RefreshProjects();
+			MessageBox.Show(this, Ex.Message, "Cannot open project");
+		}
+	}
+
+	/// <summary>Lists the projects opened before that still exist, with the open one selected.</summary>
+	void RefreshProjects()
+	{
+		_project.BeginUpdate();
+		_project.Items.Clear();
+		foreach (var P in _state.RecentProjects.Where(File.Exists)) { _project.Items.Add(P); }
+		if (_proj != null)
+		{
+			var Open = _project.Items.Cast<string>().FirstOrDefault(P => P.Equals(_proj.Path_, StringComparison.OrdinalIgnoreCase));
+			if (Open == null) { _project.Items.Insert(0, Open = _proj.Path_); }
+			_project.SelectedItem = Open;
+		}
+		_project.EndUpdate();
+	}
+
+	void PickProject()
+	{
+		if (_project.SelectedItem is string P && !P.Equals(_proj?.Path_, StringComparison.OrdinalIgnoreCase)) { OpenProject(P); }
 	}
 
 	void LoadProfiles(string? Select)
@@ -219,10 +241,29 @@ public sealed class MainForm : Form, IMessageFilter
 		_profiles.Items.Clear();
 		_profiles.DisplayMember = nameof(Profile.Name);
 		foreach (var P in Profile.LoadAll(_proj)) { _profiles.Items.Add(P); }
-		var I = Math.Max(0, _profiles.Items.Cast<Profile>().ToList().FindIndex(P => P.Name == (Select ?? "Shipping")));
-		_profiles.SelectedIndex = I;
-		_current = Working((Profile)_profiles.Items[I]!);
+		if (_profiles.Items.Count == 0)
+		{
+			// Nothing saved yet: edit an unsaved profile until the first Save.
+			_profiles.SelectedIndex = -1;
+			_current = Profile.Fresh();
+		}
+		else
+		{
+			var I = Math.Max(0, _profiles.Items.Cast<Profile>().ToList().FindIndex(P => P.Name == Select));
+			_profiles.SelectedIndex = I;
+			_current = Working((Profile)_profiles.Items[I]!);
+		}
 		_loading = false;
+	}
+
+	void SaveAsProfile()
+	{
+		var N = Prompt("Profile name", _current.Name == "New profile" ? "" : _current.Name);
+		if (string.IsNullOrWhiteSpace(N)) { return; }
+		// The edits move to the new profile, so the original goes back to how it was saved.
+		if (_proj != null) { _state.For(_proj.Path_).Working.Remove(_current.Name); }
+		_current.Name = N.Trim();
+		SaveProfile(_current.Name);
 	}
 
 	/// <summary>The profile with its remembered unsaved changes, if it has any.</summary>
@@ -440,6 +481,8 @@ public sealed class MainForm : Form, IMessageFilter
 			}
 			case OptKind.Maps:
 				return MapsRow(T, O);
+			case OptKind.Override:
+				return OverrideRow(T, O);
 			case OptKind.Target:
 			{
 				const string Default = "(Project default)";
@@ -507,6 +550,38 @@ public sealed class MainForm : Form, IMessageFilter
 		Panel_.Controls.Add(Box, 0, 0);
 		Panel_.Controls.Add(Browse, 1, 0);
 		return Panel_;
+	}
+
+	/// <summary>A checkbox that turns an override on, and its number. While off, the number shows the project's value.</summary>
+	Row OverrideRow(TableLayoutPanel T, OptionDef O)
+	{
+		var Value = O.GetNumber!(_current);
+		var Tick = new CheckBox { Text = O.Label, Checked = Value.HasValue, AutoSize = true };
+		var Box = new NumericUpDown { Minimum = O.Min, Maximum = O.Max, DecimalPlaces = O.Decimals, Increment = O.Decimals > 0 ? 0.25m : 1, ThousandsSeparator = O.Max > 1000, Dock = DockStyle.Fill };
+		Box.Value = Math.Clamp(Value ?? O.Fallback, O.Min, O.Max);
+		Tick.CheckedChanged += (_, _) =>
+		{
+			if (_loading) { return; }
+			if (Tick.Checked)
+			{
+				var On = Math.Max(Box.Value, O.MinWhenOn);
+				_loading = true;
+				Box.Value = On;
+				_loading = false;
+				O.SetNumber!(_current, On);
+			}
+			else { O.SetNumber!(_current, null); }
+			RefreshStates();
+		};
+		Box.ValueChanged += (_, _) =>
+		{
+			if (_loading || !Tick.Checked) { return; }
+			O.SetNumber!(_current, Box.Value);
+			RefreshStates();
+		};
+		T.Controls.Add(Tick);
+		T.Controls.Add(Box);
+		return new Row { O = O, Editor = Box, Caption = Tick };
 	}
 
 	Row MapsRow(TableLayoutPanel T, OptionDef O)
@@ -662,6 +737,17 @@ public sealed class MainForm : Form, IMessageFilter
 				var Enabled = Supported && R.O.Enabled(Ctx);
 				R.Editor.Enabled = Enabled;
 				if (R.Extra is CheckedListBox) { R.Extra.Enabled = Enabled; }
+				if (R.O.Kind == OptKind.Override && R.Caption is CheckBox Tick && R.Editor is NumericUpDown Number)
+				{
+					Tick.Enabled = Enabled;
+					Number.Enabled = Enabled && Tick.Checked;
+					if (!Tick.Checked)
+					{
+						var Shown = (Settings != null ? R.O.ProjectNumber?.Invoke(Settings) : null) ?? R.O.Fallback;
+						Number.Value = Math.Clamp(Shown, R.O.Min, R.O.Max);
+					}
+					_tips.SetToolTip(Tick, Supported ? R.O.Tip : $"UE {_eng!.Version}'s cooker has no {string.Join(", ", R.O.CookSwitches)}");
+				}
 				var Missing = Supported ? "" : !FlagsOk ? $"UE {_eng!.Version} has no -{string.Join(" or -", R.O.Flags)}" : $"UE {_eng!.Version}'s cook commandlet has no -{string.Join(" or -", R.O.CookSwitches)}";
 				if (R.Editor is CheckBox C && R.O.Kind != OptKind.Maps)
 				{
@@ -925,6 +1011,22 @@ public sealed class MainForm : Form, IMessageFilter
 			SelectEngine(First, false);
 			await Until(() => _eng?.Root == First, 60);
 			await Task.Delay(300);
+			Notify($"projects: {_project.Items.Count} listed, open={_project.SelectedItem}");
+			if (_project.Items.Count > 1)
+			{
+				var Home = _proj!.Path_;
+				var Other = _project.Items.Cast<string>().First(P => P != Home);
+				_project.SelectedItem = Other;
+				PickProject();
+				await Until(() => _eng != null, 60);
+				await Task.Delay(300);
+				Notify($"projects: switched to {_proj!.Name}, box={Path.GetFileName((string)_project.SelectedItem!)}, first={Path.GetFileName((string)_project.Items[0]!)}, engine={_eng?.Version}");
+				_project.SelectedItem = _project.Items.Cast<string>().First(P => P == Home);
+				PickProject();
+				await Until(() => _eng?.Root == First, 60);
+				await Task.Delay(300);
+				Notify($"projects: back on {_proj!.Name}");
+			}
 			Notify("hover: " + await HoverTest());
 			Notify("pick: " + await PickTest("DevelopmentPackage", false));
 			Notify("pick: " + await PickTest("LooseFiles", false));

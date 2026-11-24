@@ -46,6 +46,12 @@ public sealed class Profile
 	public string ExtraCook { get; set; } = "";
 	public bool SkipEditorContent { get; set; }
 
+	// Concurrent cook overrides. Empty means the project's own setting is used.
+	public decimal? CookProcesses { get; set; }
+	public decimal? CoreSubscription { get; set; }
+	public decimal? MaxConcurrentShaderJobs { get; set; }
+	public decimal? MaxPrecacheShaderJobs { get; set; }
+
 	// Build
 	public bool Build { get; set; } = true;
 	public bool ForceBuild { get; set; }
@@ -105,9 +111,10 @@ public sealed class Profile
 	}
 	public Profile Clone() => JsonSerializer.Deserialize<Profile>(JsonSerializer.Serialize(this))!;
 
-	public static Profile Shipping() => new();
-	public static Profile Development() => new() { Name = "Development", Config = "Development", IncludeDebugFiles = true, Suffix = "dev", Zip = false };
+	/// <summary>An unsaved profile with default settings. It is not written anywhere until the user saves it.</summary>
+	public static Profile Fresh() => new() { Name = "New profile" };
 
+	/// <summary>Only the profiles the user has saved for this project. A project starts with none.</summary>
 	public static List<Profile> LoadAll(ProjectInfo Project)
 	{
 		var Out = new List<Profile>();
@@ -115,7 +122,6 @@ public sealed class Profile
 		{
 			foreach (var F in Directory.GetFiles(Project.ProfileDir, "*.json").OrderBy(F => F)) { try { Out.Add(Load(F)); } catch (JsonException) { } }
 		}
-		if (Out.Count == 0) { Out.Add(Shipping()); Out.Add(Development()); }
 		return Out;
 	}
 }

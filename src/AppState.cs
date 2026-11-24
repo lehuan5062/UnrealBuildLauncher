@@ -23,7 +23,25 @@ public sealed class AppState
 
 	public string LastProject { get; set; } = "";
 	public string LastEngine { get; set; } = "";
+
+	/// <summary>Projects opened before, most recent first.</summary>
+	public List<string> RecentProjects { get; set; } = new();
 	public Dictionary<string, ProjectMemory> Projects { get; set; } = new();
+
+	public void AddRecent(string ProjectPath)
+	{
+		RecentProjects.RemoveAll(P => P.Equals(ProjectPath, StringComparison.OrdinalIgnoreCase));
+		RecentProjects.Insert(0, ProjectPath);
+		if (RecentProjects.Count > 20) { RecentProjects.RemoveRange(20, RecentProjects.Count - 20); }
+	}
+
+	/// <summary>State saved before the recent list existed still knows which projects were opened.</summary>
+	void SeedRecent()
+	{
+		if (RecentProjects.Count > 0) { return; }
+		foreach (var Key in Projects.Keys) { RecentProjects.Add(Key); }
+		if (LastProject.Length > 0) { AddRecent(LastProject); }
+	}
 
 	public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UELauncher", "state.json");
 
@@ -41,7 +59,12 @@ public sealed class AppState
 	{
 		try
 		{
-			if (File.Exists(FilePath)) { return JsonSerializer.Deserialize<AppState>(File.ReadAllText(FilePath)) ?? new AppState(); }
+			if (File.Exists(FilePath))
+			{
+				var State = JsonSerializer.Deserialize<AppState>(File.ReadAllText(FilePath)) ?? new AppState();
+				State.SeedRecent();
+				return State;
+			}
 		}
 		catch (Exception Ex) when (Ex is JsonException or IOException or UnauthorizedAccessException) { }
 		return new AppState();

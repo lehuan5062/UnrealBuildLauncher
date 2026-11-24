@@ -50,7 +50,10 @@ public sealed class EngineInfo
 
 public static class EngineScanner
 {
-	const int ScanVersion = 4;
+	const int ScanVersion = 5;
+	static readonly Regex CookSettingRx = new(@"TEXT\(""-?(CookProcessCount|MPCookCoreSubscription|MaxConcurrentShaderJobs|MaxPrecacheShaderJobs)=?""\)", RegexOptions.Compiled);
+	static readonly string CookServerSource = Path.Combine("Engine", "Source", "Editor", "UnrealEd", "Private", "CookOnTheFlyServer.cpp");
+	static readonly string CookDirectorSource = Path.Combine("Engine", "Source", "Editor", "UnrealEd", "Private", "Cooker", "CookDirector.cpp");
 	static readonly Regex SwitchRx = new(@"Switches\.Contains\(\s*TEXT\(""(\w+)""\)\s*\)", RegexOptions.Compiled);
 	static readonly string CookCommandletSource = Path.Combine("Engine", "Source", "Editor", "UnrealEd", "Private", "Commandlets", "CookCommandlet.cpp");
 	static readonly string UnrealEdDll = Path.Combine("Engine", "Binaries", "Win64", "UnrealEditor-UnrealEd.dll");
@@ -112,7 +115,7 @@ public static class EngineScanner
 
 	static string MakeStamp(string Root)
 	{
-		var Parts = new[] { Path.Combine("Engine", "Build", "Build.version"), Path.Combine("Engine", "Build", "InstalledBuild.txt"), Path.Combine("Engine", "Config", "BaseEngine.ini"), Path.Combine(UatSource, "AutomationUtils", "ProjectParams.cs"), Path.Combine(UatSource, "Scripts", "BuildCookRun.Automation.cs"), Path.Combine("Engine", "Binaries", "DotNET", "AutomationTool", "AutomationTool.dll"), CookCommandletSource, UnrealEdDll }.Concat(LauncherScan.SourceFiles());
+		var Parts = new[] { Path.Combine("Engine", "Build", "Build.version"), Path.Combine("Engine", "Build", "InstalledBuild.txt"), Path.Combine("Engine", "Config", "BaseEngine.ini"), Path.Combine(UatSource, "AutomationUtils", "ProjectParams.cs"), Path.Combine(UatSource, "Scripts", "BuildCookRun.Automation.cs"), Path.Combine("Engine", "Binaries", "DotNET", "AutomationTool", "AutomationTool.dll"), CookCommandletSource, CookServerSource, CookDirectorSource, UnrealEdDll }.Concat(LauncherScan.SourceFiles());
 		return ScanVersion + ":" + string.Join("|", Parts.Select(P => { var F = new FileInfo(Path.Combine(Root, P)); return F.Exists ? F.LastWriteTimeUtc.Ticks + "/" + F.Length : "-"; }));
 	}
 
@@ -142,6 +145,10 @@ public static class EngineScanner
 		var Found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var Source = Path.Combine(Info.Root, CookCommandletSource);
 		if (File.Exists(Source)) { foreach (Match M in SwitchRx.Matches(File.ReadAllText(Source))) { Found.Add(M.Groups[1].Value); } }
+		foreach (var File_ in new[] { CookServerSource, CookDirectorSource }.Select(F => Path.Combine(Info.Root, F)).Where(File.Exists))
+		{
+			foreach (Match M in CookSettingRx.Matches(File.ReadAllText(File_))) { Found.Add(M.Groups[1].Value); }
+		}
 		if (Found.Count == 0)
 		{
 			var Dll = Path.Combine(Info.Root, UnrealEdDll);

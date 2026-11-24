@@ -53,6 +53,11 @@ public sealed class ProjectSettings
 	public bool EnablePakStreaming { get; private init; }
 	public bool AllowRemoteNetworkService { get; private init; }
 	public bool LegacyIterative { get; private init; }
+	public decimal? CookProcessCount { get; private init; }
+	public decimal? MaxConcurrentShaderJobs { get; private init; }
+	public decimal? MaxPrecacheShaderJobs { get; private init; }
+
+	static decimal? Number(IniStack Ini, string Key) => decimal.TryParse(Ini.Get("CookSettings", Key), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var V) ? V : null;
 
 	/// <summary>The same settings with a profile's Zen Store choice applied: Project leaves them alone, On or Off replaces what the project says.</summary>
 	public ProjectSettings WithZenStore(string? Choice)
@@ -109,7 +114,10 @@ public sealed class ProjectSettings
 				Compressed = Game.GetBool(Packaging, "bCompressed"),
 				EnablePakStreaming = Game.GetBool(Packaging, "bEnablePakStreaming"),
 				AllowRemoteNetworkService = EngineIni.GetBool("Zen", "AutoLaunch") && AllowRemote,
-				LegacyIterative = Editor.GetBool("CookSettings", "LegacyIterative")
+				LegacyIterative = Editor.GetBool("CookSettings", "LegacyIterative"),
+				CookProcessCount = Number(Editor, "CookProcessCount"),
+				MaxConcurrentShaderJobs = Number(Editor, "MaxConcurrentShaderJobs"),
+				MaxPrecacheShaderJobs = Number(Editor, "MaxPrecacheShaderJobs")
 			};
 		});
 	}

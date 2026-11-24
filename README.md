@@ -13,7 +13,7 @@ Run `build.cmd` (needs the .NET 9 SDK or newer). The result is `publish\UELaunch
     UELauncher.exe --scan <engine folder> [--project <file.uproject>] [--platform <name>] [--config <name>] [--flags] [--force]
     UELauncher.exe --cli <profile name or file> --project <file.uproject> [--engine <folder>] [--dry-run]
 
-Profiles are JSON in `<project>/Build/UELauncher/`. Builds are archived to `<project>/Saved/StagedBuilds/<date>-<suffix>` (never overwritten), with an optional zip and a report of size and leftover debug files.
+A project starts with no profiles: set the options and press **Save** (or **Save as...**) to create one. Profiles are JSON in `<project>/Build/UELauncher/`. Builds are archived to `<project>/Saved/StagedBuilds/<date>-<suffix>` (never overwritten), with an optional zip and a report of size and leftover debug files.
 
 The app reopens the last project, and for each project remembers its engine, its profile and any option changes you have not saved. This is kept per user in `%LOCALAPPDATA%\UELauncher\state.json`, so the project's profile files only change when you press Save. **Revert** discards the unsaved changes.
 
@@ -30,6 +30,8 @@ Nothing is keyed on a version number. For the selected engine folder and project
 Compress Pak Files and Use Io Store have three states, because UAT follows the project setting unless told otherwise: *Project setting* passes nothing, *On* passes `-compressed` / `-iostore`, *Off* passes `-ForceUncompressed` / `-skipiostore`.
 
 **Zen Store** (Project setting / On / Off) overrides the project's Zen Store setting for one profile. Off adds `-SkipZenStore` to the cook commandlet's options (it beats the project setting; UAT forwards it through `-AdditionalCookerOptions`), so the cook writes loose files and Loose Files becomes selectable even when the project has Zen Store on, which is the default in UE 5.8. The scan reads which switches each engine's cook commandlet has (from its source, or from the editor module when the source is not installed) and greys the option if `SkipZenStore` is missing.
+
+**Concurrent Cook** has one checkbox per override; unticked uses the project's value. Cook processes (`-CookProcessCount`), core subscription (`-MPCookCoreSubscription`), and max concurrent and precache shader jobs (`-ini:Editor:[CookSettings]:...`, for that cook only). Each goes through `-AdditionalCookerOptions` and is available only if the selected engine's cooker reads it.
 
 Not included: Epic's Boot Test, Build Sync, UGS Sync, Profile Wizard and Insights extensions, and listing connected devices. Type device names as `Platform@Device`; other flags are in the All engine flags tab.
 

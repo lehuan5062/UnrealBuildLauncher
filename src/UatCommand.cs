@@ -114,6 +114,16 @@ public static class UatCommand
 			if (!P.Unversioned) { Flag("VersionCookedContent"); }
 			var CookerOptions = P.ExtraCook.Trim();
 			if (P.ZenStore.Equals("Off", StringComparison.OrdinalIgnoreCase) && CanSkipZen && !B.ZenStreaming) { CookerOptions = (CookerOptions + " -SkipZenStore").Trim(); }
+			void Cooker(string Switch, decimal? Number, string Format)
+			{
+				if (Number == null) { return; }
+				if (!E.HasCookSwitch(Switch)) { Plan.Warnings.Add($"UE {E.Version}'s cooker has no {Switch}: skipped."); return; }
+				CookerOptions = (CookerOptions + " " + string.Format(System.Globalization.CultureInfo.InvariantCulture, Format, Number.Value)).Trim();
+			}
+			Cooker("CookProcessCount", P.CookProcesses, "-CookProcessCount={0:0}");
+			if (P.CookProcesses > 1) { Cooker("MPCookCoreSubscription", P.CoreSubscription, "-MPCookCoreSubscription={0:0.##}"); }
+			Cooker("MaxConcurrentShaderJobs", P.MaxConcurrentShaderJobs, "-ini:Editor:[CookSettings]:MaxConcurrentShaderJobs={0:0}");
+			Cooker("MaxPrecacheShaderJobs", P.MaxPrecacheShaderJobs, "-ini:Editor:[CookSettings]:MaxPrecacheShaderJobs={0:0}");
 			Value("AdditionalCookerOptions", CookerOptions);
 			if (B.Zen) { Flag("zenstore"); }
 			PakFlags();
